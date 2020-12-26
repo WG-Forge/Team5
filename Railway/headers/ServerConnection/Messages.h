@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include "../JsonUtils/JsonWriter.h"
+#include "../Utils/JsonWriter.h"
 #include "Login.h"
 
 enum class Action {
@@ -39,5 +39,7 @@ struct ResposeMessage {
 };
 
 struct MoveRequest {
+	MoveRequest(int line_idx, int speed, int train_idx) :
+		line_idx(line_idx), speed(speed), train_idx(train_idx) {}
 	int line_idx, speed, train_idx;
 };

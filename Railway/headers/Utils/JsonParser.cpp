@@ -47,39 +47,26 @@ Player JsonParser::ParsePlayer(std::string& input) {
 	int rating = doc["rating"].GetInt();
 
 	const auto& trains_item = doc["trains"].GetArray();
-	vector<Train> trains = ParseTrains(trains_item);
+	std::unordered_map<int, Train> trains = ParseTrains(trains_item);
 
 	const auto& town_item = doc["town"].GetObject();
 	auto town_ptr = ParseTown(town_item);
 	return Player{ home, move(idx), in_game, move(name), rating, move(*town_ptr), move(trains) };
 }
 
-std::unordered_map<int, std::shared_ptr<Post>> JsonParser::ParsePosts(std::string& input) {
+MapLayer1Response JsonParser::ParseMapLayer1(std::string& input) {
 	using namespace rapidjson;
 	using namespace std;
 	Document doc;
 	doc.Parse(input.c_str());
 
-	unordered_map<int, shared_ptr<Post>> result;
-
 	const auto& posts_array = doc["posts"].GetArray();
-	for (const auto& item : posts_array) {
-		PostType type = static_cast<PostType>(item["type"].GetInt());
-		shared_ptr<Post> post_ptr;
-		switch (type) {
-		case PostType::TOWN:
-			post_ptr = ParseTown(item);
-			break;
-		case PostType::STORAGE:
-			post_ptr = ParseStorage(item);
-			break;
-		case PostType::MARKET:
-			post_ptr = ParseMarket(item);
-			break;
-		}
-		result[post_ptr->point_idx] = move(post_ptr);
-	}
-	return result;
+	const auto& trains_array = doc["trains"].GetArray();
+	const auto& ratings_item = doc["ratings"].GetObject();
+	const auto& item = ratings_item.MemberBegin()->value.GetObject();
+	int rating = item["rating"].GetInt();
+
+	return { ParsePosts(posts_array), ParseTrains(trains_array), rating};
 }
 
 std::vector<std::pair<int, Point>> JsonParser::ParseCoordinates(std::string& input) {
@@ -97,14 +84,12 @@ std::vector<std::pair<int, Point>> JsonParser::ParseCoordinates(std::string& inp
 	return res;
 }
 
-std::vector<Train> JsonParser::ParseTrains(const rapidjson::GenericArray<false, rapidjson::Value>& array) {
-	std::vector<Train> trains;
+std::unordered_map<int, Train> JsonParser::ParseTrains(const rapidjson::GenericArray<false, rapidjson::Value>& array) {
+	std::unordered_map<int, Train> trains;
 	trains.reserve(array.Size());
 	for (const auto& item : array) {
 		Train train;
 		train.cooldown = item["cooldown"].GetInt();
-		//train.fuel = item["fuel"].GetInt();
-		//train.fuel_capacity = item["fuel_capacity"].GetInt();
 		train.goods = item["goods"].GetInt();
 		train.goods_capacity = item["goods_capacity"].GetInt();
 		const auto& goods_type_item = item["goods_type"];
@@ -118,11 +103,16 @@ std::vector<Train> JsonParser::ParseTrains(const rapidjson::GenericArray<false, 
 		train.idx = item["idx"].GetInt();
 		train.level = item["level"].GetInt();
 		train.line_idx = item["line_idx"].GetInt();
-		train.next_level_price = item["next_level_price"].GetInt();
 		train.player_idx = item["player_idx"].GetString();
 		train.position = item["position"].GetInt();
 		train.speed = item["speed"].GetInt();
-		trains.push_back(train);
+		if (item["next_level_price"].IsInt()) {
+			train.next_level_price = item["next_level_price"].GetInt();
+		}
+		else {
+			train.next_level_price = std::nullopt;
+		}
+		trains[train.idx] = train;
 	}
 	return trains;
 }
@@ -158,6 +148,7 @@ std::shared_ptr<Market> JsonParser::ParseMarket(const rapidjson::Value& market_i
 	market->point_idx = market_item["point_idx"].GetInt();
 	market->product = market_item["product"].GetInt();
 	market->product_capacity = market_item["product_capacity"].GetInt();
+	market->replenishment = market_item["replenishment"].GetInt();
 	market->type = PostType::MARKET;
 	return market;
 }
@@ -169,6 +160,34 @@ std::shared_ptr<Storage> JsonParser::ParseStorage(const rapidjson::Value& storag
 	storage->idx = storage_item["idx"].GetInt();
 	storage->name = storage_item["name"].GetString();
 	storage->point_idx = storage_item["point_idx"].GetInt();
+	storage->replenishment = storage_item["replenishment"].GetInt();
 	storage->type = PostType::STORAGE;
 	return storage;
+}
+
+std::unordered_map<int, std::shared_ptr<Post>> JsonParser::ParsePosts(const rapidjson::GenericArray<false, rapidjson::Value>& array)
+{
+	std::unordered_map<int, std::shared_ptr<Post>> result;
+	for (const auto& item : array) {
+		PostType type = static_cast<PostType>(item["type"].GetInt());
+		std::shared_ptr<Post> post_ptr;
+		switch (type) {
+		case PostType::TOWN:
+			post_ptr = ParseTown(item);
+			break;
+		case PostType::STORAGE:
+			post_ptr = ParseStorage(item);
+			break;
+		case PostType::MARKET:
+			post_ptr = ParseMarket(item);
+			break;
+		}
+		result[post_ptr->point_idx] = move(post_ptr);
+	}
+	return result;
+}
+
+std::unordered_map<std::string, int> JsonParser::ParseRatings(const rapidjson::GenericArray<false, rapidjson::Value>& array)
+{
+	return std::unordered_map<std::string, int>();
 }

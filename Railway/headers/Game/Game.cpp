@@ -1,6 +1,6 @@
 #include "Game.h"
-#include "../JsonUtils/JsonParser.h"
-#include "../JsonUtils/JsonWriter.h"
+#include "../Utils/JsonParser.h"
+#include "../Utils/JsonWriter.h"
 
 using PostMap = std::unordered_map<int, std::shared_ptr<Post>>;
 
@@ -75,4 +75,12 @@ std::string Game::GetPostInfo(const int& post_index) const {
 		}
 	}
 	return post_info;
+}
+
+PostType Game::GetPostType(int idx) const
+{
+	if (idx_to_post.find(idx) != idx_to_post.end()) {
+		return idx_to_post.at(idx)->type;
+	}
+	return PostType::DEFAULT;
 }
