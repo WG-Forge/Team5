@@ -10,8 +10,14 @@ Controller::Controller() :logger("logs.txt") {}
 
 void Controller::Init()
 {
-	connection.send(ActionMessage{ Login{} });
+	Login login;
+	connection.send(ActionMessage{ login });
 	auto login_response = connection.recieve();
+	logger << ige::FileLogger::e_logType::LOG_INFO << "Connected";
+
+	connection.send(ActionMessage{ Action::GAMES,"" });
+	auto recv = connection.recieve();
+
 	auto& player = game.GetPlayer();
 	player = JsonParser::ParsePlayer(login_response.data);
 
@@ -43,6 +49,7 @@ void Controller::Disconnect()
 {
 	connection.send(ActionMessage(Action::LOGOUT, ""));
 	//auto msg = connection.recieve();
+	logger << ige::FileLogger::e_logType::LOG_INFO << "Disconnected";
 }
 
 const SynchronizedGame Controller::GetGame()
@@ -54,6 +61,7 @@ void Controller::MakeTurn()
 {
 	auto start = std::chrono::steady_clock::now();
 	UpdateGame();
+	CheckTrainCrashed();
 	CheckUpgrades();
 	auto moves = route_manager.MakeMoves(game);
 	SendMoveRequests(moves);
@@ -72,9 +80,16 @@ int Controller::GetTurnNumber() const
 	return turn_number;
 }
 
-bool Controller::IsGameOver() const
+GameState Controller::GetGameState() const
 {
-	return game_over;
+	return state;
+}
+
+void Controller::WaitForGameStart()
+{
+	while (state != GameState::RUN) {
+		UpdateGameState();
+	}
 }
 
 void Controller::UpdateGame()
@@ -86,7 +101,7 @@ void Controller::UpdateGame()
 	}
 	auto& idx_to_post = game.GetPosts();
 	auto& trains = game.GetPlayer().trains;
-	auto[new_posts, new_trains, rating] = JsonParser::ParseMapLayer1(map_layer1_response.data);
+	auto [new_posts, new_trains, rating] = JsonParser::ParseMapLayer1(map_layer1_response.data);
 	{
 		auto guard = std::lock_guard{ game_mutex };
 		idx_to_post = move(new_posts);
@@ -96,6 +111,38 @@ void Controller::UpdateGame()
 		auto& player = game.GetPlayer();
 		player.home_town = *std::dynamic_pointer_cast<Town>(idx_to_post[player.home.idx]);
 		player.rating = rating;
+	}
+}
+
+void Controller::UpdateGameState()
+{
+	connection.send(ActionMessage{ Action::GAMES,"" });
+	auto recv = connection.recieve();
+	state = JsonParser::ParseGameState(recv.data, login.game.value());
+
+	switch (state)
+	{
+	case GameState::INIT:
+		logger << ige::FileLogger::e_logType::LOG_INFO
+			<< "Waiting for the game's start";
+		break;
+	case GameState::RUN:
+		logger << ige::FileLogger::e_logType::LOG_INFO
+			<< "Game started";
+		break;
+	case GameState::FINISHED:
+		logger << ige::FileLogger::e_logType::LOG_INFO
+			<< "Game finished";
+		break;
+	}
+}
+
+void Controller::CheckTrainCrashed()
+{
+	for (const auto& [idx, train] : game.GetPlayer().trains) {
+		if (train.crashed) {
+			route_manager.TrainCrashed(idx, train.cooldown);
+		}
 	}
 }
 
@@ -153,9 +200,10 @@ void Controller::CheckUpgrades()
 void Controller::CheckResponse(const ResposeMessage& msg)
 {
 	if (msg.result == Result::INAPPROPRIATE_GAME_STATE) {
-		game_over = true;
+		UpdateGameState();
 	}
-	else {
+
+	if (state != GameState::FINISHED) {
 		LogErrorRecieve(msg);
 	}
 }
@@ -182,7 +230,7 @@ bool Controller::IsTrainAtHome(int idx)
 void Controller::LogErrorRecieve(const ResposeMessage& response)
 {
 	std::stringstream ss;
-	ss  << "Error code: " << static_cast<int>(response.result) << '\n' 
+	ss << "Error code: " << static_cast<int>(response.result) << '\n'
 		<< "Error message: " << response.data;
 	logger << ige::FileLogger::e_logType::LOG_ERROR;
 	logger << ss.str();
